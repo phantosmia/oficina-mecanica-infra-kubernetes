@@ -1,0 +1,19 @@
+aws_region          = "us-east-1"
+environment         = "dev"
+cluster_name        = "oficina-mecanica-dev"
+kubernetes_version  = "1.30"
+node_instance_types = ["t3.medium"]
+node_desired_size   = 3
+node_min_size       = 1
+node_max_size       = 3
+node_disk_size      = 30
+github_repository   = "phantosmia/oficina-mecanica-fiap"
+github_branch       = "main"
+# Copie do output rds_secret_arn do repositório oficina-mecanica-infra-banco-dados
+# após aplicar aquele Terraform.
+rds_secret_arn      = ""
+
+tags = {
+  Owner      = "seu-usuario"
+  CostCenter = "fiap"
+}

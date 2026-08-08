@@ -6,13 +6,35 @@ on:
     branches:
       - homologacao
       - producao
+  workflow_dispatch:
+    inputs:
+      auth_mode:
+        description: "Modo de autenticação AWS"
+        type: choice
+        options:
+          - oidc
+          - aws-academy
+        default: aws-academy
 
 permissions:
   contents: read
+  id-token: write
+
+concurrency:
+  group: terraform-k8s-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  AWS_AUTH_MODE: ${{ inputs.auth_mode || vars.AWS_AUTH_MODE || 'aws-academy' }}
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  TF_STATE_REGION: ${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-east-1' }}
+  TF_LOCK_TABLE: ${{ vars.TF_LOCK_TABLE }}
 
 jobs:
-  validate:
-    name: Validar
+  plan:
+    name: Plan (PR)
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -27,19 +49,194 @@ jobs:
       - name: Terraform fmt
         run: terraform fmt -check -recursive
 
-      - name: Terraform init (sem backend remoto — esqueleto placeholder)
+      - name: Configurar credenciais AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform init (sem backend remoto — plan de validação, não usa state real)
         run: terraform init -backend=false
 
       - name: Terraform validate
         run: terraform validate
 
-  deploy-placeholder:
-    name: Deploy (${{ github.ref_name }})
-    if: github.event_name == 'push'
-    needs: validate
+      - name: Terraform plan
+        run: terraform plan -var="environment=dev-preview"
+
+  apply:
+    name: Apply (${{ github.ref_name }})
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
 
     steps:
-      - name: Placeholder de deploy
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Configurar kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configurar credenciais AWS via OIDC
+        if: ${{ env.AWS_AUTH_MODE == 'oidc' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_TO_ASSUME || secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configurar credenciais AWS Academy
+        if: ${{ env.AWS_AUTH_MODE == 'aws-academy' }}
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Preparar backend remoto do Terraform
+        env:
+          TF_BACKEND_CONFIG: ${{ secrets.TF_BACKEND_CONFIG }}
         run: |
-          echo "Placeholder: implementação real pendente. Nada a implantar ainda."
+          if [ -n "${TF_BACKEND_CONFIG}" ]; then
+            printf '%s\n' "${TF_BACKEND_CONFIG}" | sed "s#/dev/#/${{ github.ref_name }}/#" > backend.hcl
+          else
+            if [ -z "${TF_STATE_BUCKET}" ] || [ -z "${TF_LOCK_TABLE}" ]; then
+              echo "Configure o secret TF_BACKEND_CONFIG ou as variables TF_STATE_BUCKET e TF_LOCK_TABLE." >&2
+              exit 1
+            fi
+
+            cat > backend.hcl <<EOF
+          bucket         = "${TF_STATE_BUCKET}"
+          key            = "kubernetes/${{ github.ref_name }}/terraform.tfstate"
+          region         = "${TF_STATE_REGION}"
+          dynamodb_table = "${TF_LOCK_TABLE}"
+          encrypt        = true
+          EOF
+          fi
+
+      - name: Preparar variáveis do Terraform
+        env:
+          AUTH_MODE: ${{ env.AWS_AUTH_MODE }}
+          EKS_ADMIN_PRINCIPAL_ARN: ${{ vars.EKS_ADMIN_PRINCIPAL_ARN }}
+          EKS_CLUSTER_ROLE_ARN: ${{ vars.EKS_CLUSTER_ROLE_ARN }}
+          EKS_NODE_ROLE_ARN: ${{ vars.EKS_NODE_ROLE_ARN }}
+          NODE_DESIRED_SIZE: ${{ vars.NODE_DESIRED_SIZE || '1' }}
+          NODE_MIN_SIZE: ${{ vars.NODE_MIN_SIZE || '1' }}
+          NODE_MAX_SIZE: ${{ vars.NODE_MAX_SIZE || '2' }}
+          NODE_DISK_SIZE: ${{ vars.NODE_DISK_SIZE || '20' }}
+          RDS_SECRET_ARN: ${{ vars.RDS_SECRET_ARN }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          values = {}
+          if os.environ.get("RDS_SECRET_ARN"):
+              values["rds_secret_arn"] = os.environ["RDS_SECRET_ARN"]
+
+          if os.environ["AUTH_MODE"] == "aws-academy":
+              required = [
+                  "EKS_ADMIN_PRINCIPAL_ARN",
+                  "EKS_CLUSTER_ROLE_ARN",
+                  "EKS_NODE_ROLE_ARN",
+              ]
+              missing = [name for name in required if not os.environ.get(name)]
+              if missing:
+                  raise SystemExit(f"Configure as GitHub variables obrigatórias para aws-academy: {', '.join(missing)}")
+
+              values.update(
+                  {
+                      "eks_admin_principal_arn": os.environ["EKS_ADMIN_PRINCIPAL_ARN"],
+                      "eks_cluster_role_arn": os.environ["EKS_CLUSTER_ROLE_ARN"],
+                      "eks_node_role_arn": os.environ["EKS_NODE_ROLE_ARN"],
+                      "enable_irsa_resources": False,
+                      "enable_github_actions_oidc": False,
+                      "install_aws_load_balancer_controller": False,
+                      "install_external_secrets_operator": False,
+                      "node_desired_size": int(os.environ["NODE_DESIRED_SIZE"]),
+                      "node_min_size": int(os.environ["NODE_MIN_SIZE"]),
+                      "node_max_size": int(os.environ["NODE_MAX_SIZE"]),
+                      "node_disk_size": int(os.environ["NODE_DISK_SIZE"]),
+                  }
+              )
+
+          with open("terraform.auto.tfvars.json", "w", encoding="utf-8") as file:
+              json.dump(values, file)
+          PY
+
+      - name: Terraform init
+        run: terraform init -backend-config=backend.hcl
+
+      - name: Ajustar módulo EKS para AWS Academy
+        if: ${{ env.AWS_AUTH_MODE == 'aws-academy' }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          module_file = Path(".terraform/modules/eks/main.tf")
+          content = module_file.read_text(encoding="utf-8")
+          block_start = content.index('data "aws_iam_session_context" "current" {')
+          block_end = content.index("\n}", block_start)
+          block = content[block_start:block_end]
+
+          old = "count = local.create ? 1 : 0"
+          new = "count = local.create && var.enable_cluster_creator_admin_permissions ? 1 : 0"
+
+          if new in block:
+              print("Módulo EKS já compatível com AWS Academy.")
+          elif old in block:
+              patched_block = block.replace(old, new, 1)
+              content = content[:block_start] + patched_block + content[block_end:]
+              module_file.write_text(content, encoding="utf-8")
+              print("Módulo EKS ajustado para evitar iam:GetRole em voclabs.")
+          else:
+              raise SystemExit("Não foi possível localizar o count esperado em data.aws_iam_session_context.current.")
+          PY
+
+      - name: Ajustar módulo EKS para permitir escalar desired_size via Terraform
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          module_file = Path(".terraform/modules/eks/modules/eks-managed-node-group/main.tf")
+          content = module_file.read_text(encoding="utf-8")
+
+          # Sem essa remoção, o node group ignora silenciosamente qualquer mudança em
+          # node_desired_size após a criação inicial (não há cluster autoscaler neste projeto
+          # para disputar esse campo com o Terraform).
+          old = "    ignore_changes = [\n      scaling_config[0].desired_size,\n    ]\n"
+          new = ""
+
+          if old not in content:
+              if "ignore_changes" not in content:
+                  print("Módulo EKS já sem o ignore_changes de desired_size.")
+              else:
+                  raise SystemExit("Não foi possível localizar o ignore_changes esperado no node group do módulo EKS.")
+          else:
+              module_file.write_text(content.replace(old, new, 1), encoding="utf-8")
+              print("ignore_changes de scaling_config[0].desired_size removido do módulo EKS.")
+          PY
+
+      - name: Terraform plan
+        run: terraform plan -out=tfplan -var="environment=${{ github.ref_name }}"
+
+      - name: Terraform apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Resumo dos outputs
+        run: |
+          echo "Copie estes valores para o repositório oficina-mecanica-fiap (variables do GitHub):"
+          echo "CLUSTER_NAME (variable)         = $(terraform output -raw cluster_name)"
+          echo "ECR_REPOSITORY_URL (variable)   = $(terraform output -raw ecr_repository_url)"
+          echo "EKS_OIDC_PROVIDER_ARN (variable) = $(terraform output -raw oidc_provider_arn)"
+          echo "AWS_ROLE_TO_ASSUME (secret, publish-ecr.yml) = $(terraform output -raw github_actions_ecr_role_arn)"
+          echo ""
+          echo "Copie este valor para o repositório oficina-mecanica-infra-banco-dados (allowed_cidr_blocks):"
+          echo "VPC CIDR do EKS = $(terraform output -raw vpc_cidr_block)"
