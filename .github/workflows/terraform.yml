@@ -1,0 +1,44 @@
+name: Terraform Infra Kubernetes
+
+on:
+  pull_request:
+  push:
+    branches:
+      - homologacao
+      - producao
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validar
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init (sem backend remoto — esqueleto placeholder)
+        run: terraform init -backend=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+  deploy-placeholder:
+    name: Deploy (${{ github.ref_name }})
+    if: github.event_name == 'push'
+    needs: validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Placeholder de deploy
+        run: echo "Placeholder: implementação real pendente. Nada a implantar ainda."
