@@ -131,15 +131,22 @@ jobs:
           NODE_MIN_SIZE: ${{ vars.NODE_MIN_SIZE || '1' }}
           NODE_MAX_SIZE: ${{ vars.NODE_MAX_SIZE || '2' }}
           NODE_DISK_SIZE: ${{ vars.NODE_DISK_SIZE || '20' }}
-          RDS_SECRET_ARN: ${{ vars.RDS_SECRET_ARN }}
+          TF_STATE_BUCKET: ${{ env.TF_STATE_BUCKET }}
+          TF_STATE_REGION: ${{ env.TF_STATE_REGION }}
         run: |
           python - <<'PY'
           import json
           import os
 
           values = {}
-          if os.environ.get("RDS_SECRET_ARN"):
-              values["rds_secret_arn"] = os.environ["RDS_SECRET_ARN"]
+          # O ARN do secret do RDS e lido automaticamente via terraform_remote_state
+          # do repositorio oficina-mecanica-infra-banco-dados (ver database_state_key
+          # em variables.tf); aqui so repassamos bucket/regiao do backend compartilhado
+          # quando configurados, para nao depender dos defaults do Terraform.
+          if os.environ.get("TF_STATE_BUCKET"):
+              values["tf_state_bucket"] = os.environ["TF_STATE_BUCKET"]
+          if os.environ.get("TF_STATE_REGION"):
+              values["tf_state_region"] = os.environ["TF_STATE_REGION"]
 
           if os.environ["AUTH_MODE"] == "aws-academy":
               required = [
@@ -225,18 +232,23 @@ jobs:
           PY
 
       - name: Terraform plan
-        run: terraform plan -out=tfplan -var="environment=${{ github.ref_name }}"
+        run: |
+          terraform plan -out=tfplan \
+            -var="environment=${{ github.ref_name }}" \
+            -var="database_state_key=database/${{ github.ref_name }}/terraform.tfstate"
 
       - name: Terraform apply
         run: terraform apply -auto-approve tfplan
 
       - name: Resumo dos outputs
         run: |
-          echo "Copie estes valores para o repositório oficina-mecanica-fiap (variables do GitHub):"
-          echo "CLUSTER_NAME (variable)         = $(terraform output -raw cluster_name)"
-          echo "ECR_REPOSITORY_URL (variable)   = $(terraform output -raw ecr_repository_url)"
-          echo "EKS_OIDC_PROVIDER_ARN (variable) = $(terraform output -raw oidc_provider_arn)"
-          echo "AWS_ROLE_TO_ASSUME (secret, publish-ecr.yml) = $(terraform output -raw github_actions_ecr_role_arn)"
+          echo "cluster_name, ecr_repository_url e oidc_provider_arn são lidos automaticamente"
+          echo "pelo repositório oficina-mecanica-fiap via terraform_remote_state — nada a copiar."
           echo ""
-          echo "Copie este valor para o repositório oficina-mecanica-infra-banco-dados (allowed_cidr_blocks):"
-          echo "VPC CIDR do EKS = $(terraform output -raw vpc_cidr_block)"
+          echo "cluster_name        = $(terraform output -raw cluster_name)"
+          echo "ecr_repository_url  = $(terraform output -raw ecr_repository_url)"
+          echo "oidc_provider_arn   = $(terraform output -raw oidc_provider_arn)"
+          echo ""
+          echo "Só estes dois ainda exigem cópia manual (não são dado de estado, são credenciais/config):"
+          echo "AWS_ROLE_TO_ASSUME (secret no oficina-mecanica-fiap, workflow publish-ecr.yml) = $(terraform output -raw github_actions_ecr_role_arn)"
+          echo "allowed_cidr_blocks (tfvars/variable no oficina-mecanica-infra-banco-dados), a partir de vpc_cidr_block = $(terraform output -raw vpc_cidr_block)"
