@@ -106,10 +106,22 @@ variable "ecr_force_delete" {
   default     = false
 }
 
-variable "rds_secret_arn" {
-  description = "ARN do secret do Secrets Manager com as credenciais do RDS, provisionado pelo repositório oficina-mecanica-infra-banco-dados. Usado para dar ao External Secrets Operator permissão de leitura desse secret."
+variable "tf_state_bucket" {
+  description = "Bucket S3 do backend remoto do Terraform (o mesmo criado por infra/backend no repositório oficina-mecanica-fiap), usado para ler via terraform_remote_state o output rds_secret_arn do repositório oficina-mecanica-infra-banco-dados."
   type        = string
-  default     = ""
+  default     = "oficina-mecanica-fiap-terraform-state"
+}
+
+variable "tf_state_region" {
+  description = "Região do backend S3 do state remoto."
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "database_state_key" {
+  description = "Key do state do repositório oficina-mecanica-infra-banco-dados no backend S3 compartilhado. Ajuste para o ambiente real (ex.: database/homologacao/terraform.tfstate) ao aplicar em homologacao/producao."
+  type        = string
+  default     = "database/dev/terraform.tfstate"
 }
 
 variable "github_repository" {

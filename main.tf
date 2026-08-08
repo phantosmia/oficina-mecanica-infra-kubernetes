@@ -4,9 +4,23 @@ data "aws_availability_zones" "available" {
 
 data "aws_caller_identity" "current" {}
 
+# Le o state remoto do repositorio oficina-mecanica-infra-banco-dados (mesmo
+# backend S3 compartilhado, key diferente) para obter o ARN do secret do RDS
+# automaticamente, sem exigir uma variavel copiada manualmente a cada apply.
+data "terraform_remote_state" "database" {
+  backend = "s3"
+
+  config = {
+    bucket = var.tf_state_bucket
+    key    = var.database_state_key
+    region = var.tf_state_region
+  }
+}
+
 locals {
-  cluster_name = var.cluster_name != "" ? var.cluster_name : "${var.project_name}-${var.environment}"
-  azs          = slice(data.aws_availability_zones.available.names, 0, 3)
+  cluster_name   = var.cluster_name != "" ? var.cluster_name : "${var.project_name}-${var.environment}"
+  azs            = slice(data.aws_availability_zones.available.names, 0, 3)
+  rds_secret_arn = try(data.terraform_remote_state.database.outputs.rds_secret_arn, "")
 
   common_tags = merge(
     {
@@ -213,8 +227,8 @@ resource "helm_release" "aws_load_balancer_controller" {
 
 # Escopo do External Secrets Operator: qualquer secret prefixado com o nome do
 # cluster (cobre o secret "<cluster_name>/api" criado pelo repositório
-# oficina-mecanica-fiap) mais o secret do RDS, passado explicitamente via
-# var.rds_secret_arn (criado pelo repositório oficina-mecanica-infra-banco-dados).
+# oficina-mecanica-fiap) mais o secret do RDS, lido automaticamente do state
+# remoto do repositório oficina-mecanica-infra-banco-dados (local.rds_secret_arn).
 # Usar um prefixo por nome em vez do ARN exato do secret da API evita uma
 # dependência circular entre este repositório e o da aplicação principal.
 data "aws_iam_policy_document" "external_secrets" {
@@ -226,7 +240,7 @@ data "aws_iam_policy_document" "external_secrets" {
 
     resources = concat(
       ["arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:${local.cluster_name}*"],
-      var.rds_secret_arn == "" ? [] : [var.rds_secret_arn],
+      local.rds_secret_arn == "" ? [] : [local.rds_secret_arn],
     )
   }
 }
