@@ -98,7 +98,21 @@ Este repositório e o `oficina-mecanica-fiap` compartilham o mesmo backend S3 (c
 - Este repositório lê `rds_secret_arn` do state do `oficina-mecanica-infra-banco-dados` (`data.terraform_remote_state.database`, key controlada por `var.database_state_key`) para autorizar o External Secrets Operator.
 - O repositório `oficina-mecanica-fiap` lê `cluster_name`, `ecr_repository_url` e `oidc_provider_arn` **deste** repositório (`data.terraform_remote_state.kubernetes`) e `rds_endpoint`/`rds_password` do `oficina-mecanica-infra-banco-dados`.
 
-Isso exige uma ordem de apply: `oficina-mecanica-infra-banco-dados` → este repositório → `oficina-mecanica-fiap`. Se o state de um deles ainda não existir na `key` esperada, o `terraform plan`/`apply` do próximo falha com um erro de leitura do backend (não silenciosamente) — nesse caso, aplique a stack que falta primeiro.
+```mermaid
+flowchart LR
+    DB["oficina-mecanica-infra-banco-dados"] -- "rds_secret_arn" --> K8S["este repositório"]
+    K8S -- "cluster_name, ecr_repository_url,<br/>oidc_provider_arn" --> APP["oficina-mecanica-fiap: infra/aws"]
+    DB -- "rds_endpoint, rds_password" --> APP
+```
+
+Isso exige uma ordem de apply: `oficina-mecanica-infra-banco-dados` → este repositório → `oficina-mecanica-fiap`. Se o state de um deles ainda não existir na `key` esperada (ex.: `database/homologacao/terraform.tfstate` nunca foi criado porque aquele repositório nunca foi aplicado nesse ambiente), o `terraform plan`/`apply` do próximo **falha imediatamente**, não silenciosamente:
+
+```
+Error: Unable to find remote state
+No stored state was found for the given workspace in the given backend.
+```
+
+O workflow [`terraform.yml`](.github/workflows/terraform.yml) já detecta esse erro específico (procura por "Unable to find remote state" no log do `plan`) e imprime qual repositório aplicar primeiro. Localmente, a correção é sempre a mesma: aplique o `oficina-mecanica-infra-banco-dados` primeiro, no mesmo ambiente que este repositório está tentando ler (`var.database_state_key`).
 
 Só dois valores **não** podem ser automatizados por não serem dado de state, e continuam manuais:
 

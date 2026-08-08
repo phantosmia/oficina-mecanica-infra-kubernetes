@@ -233,9 +233,19 @@ jobs:
 
       - name: Terraform plan
         run: |
-          terraform plan -out=tfplan \
+          # Este plan lê rds_secret_arn do repositório oficina-mecanica-infra-banco-dados
+          # via terraform_remote_state. Se aquele repositório nunca foi aplicado no
+          # ambiente "${{ github.ref_name }}", o plan falha com "Unable to find remote
+          # state" — capturamos aqui para deixar a causa raiz e a correção explícitas.
+          if ! terraform plan -out=tfplan \
             -var="environment=${{ github.ref_name }}" \
-            -var="database_state_key=database/${{ github.ref_name }}/terraform.tfstate"
+            -var="database_state_key=database/${{ github.ref_name }}/terraform.tfstate" \
+            2>&1 | tee /tmp/tf-plan.log; then
+            if grep -q "Unable to find remote state" /tmp/tf-plan.log; then
+              echo "::error::terraform plan falhou ao ler o state remoto do oficina-mecanica-infra-banco-dados. Aplique aquele repositório primeiro no ambiente '${{ github.ref_name }}' antes de rodar este workflow."
+            fi
+            exit 1
+          fi
 
       - name: Terraform apply
         run: terraform apply -auto-approve tfplan
