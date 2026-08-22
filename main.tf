@@ -64,6 +64,49 @@ module "vpc" {
   tags = local.common_tags
 }
 
+# --- VPC Peering com a VPC do banco de dados ------------------------------
+# A aplicação principal (rodando nos nodes desta VPC) precisa alcançar o RDS
+# PostgreSQL, que fica numa VPC própria e isolada (oficina-mecanica-infra-
+# banco-dados, sem Internet Gateway/NAT, ver ADR-0005 em oficina-mecanica-
+# fiap). As duas VPCs não têm CIDR sobreposto de propósito (10.0.0.0/16
+# aqui, 10.90.0.0/24 lá) justamente para permitir este peering.
+#
+# Vive neste repositório (não no do banco) porque a ordem de apply da
+# Fase 3 já garante que o state do banco existe antes deste repositório
+# (data.terraform_remote_state.database acima) — o inverso não seria
+# verdade, e o banco de dados apply primeiro, sozinho, sem saber que o EKS
+# vai existir. Por isso a rota "de volta" (aws_route.database_to_private
+# abaixo) também é gerenciada por aqui, mirando a route table default da
+# VPC do banco via os outputs vpc_cidr_block/default_route_table_id
+# daquele repositório — mesma conta/região, então uma aws_route resource
+# consegue apontar pra lá sem problema, mesmo não sendo "dono" daquele
+# state.
+#
+# O security group do RDS (allowed_cidr_blocks, no repositório do banco)
+# continua exigindo liberação manual do CIDR desta VPC — o peering só
+# resolve o roteamento, não a autorização.
+resource "aws_vpc_peering_connection" "eks_to_database" {
+  vpc_id      = module.vpc.vpc_id
+  peer_vpc_id = data.terraform_remote_state.database.outputs.vpc_id
+  auto_accept = true # mesma conta e região: dispensa um accepter separado
+
+  tags = merge(local.common_tags, { Name = "${local.cluster_name}-to-database" })
+}
+
+resource "aws_route" "private_to_database" {
+  for_each = toset(module.vpc.private_route_table_ids)
+
+  route_table_id            = each.value
+  destination_cidr_block    = data.terraform_remote_state.database.outputs.vpc_cidr_block
+  vpc_peering_connection_id = aws_vpc_peering_connection.eks_to_database.id
+}
+
+resource "aws_route" "database_to_private" {
+  route_table_id            = data.terraform_remote_state.database.outputs.default_route_table_id
+  destination_cidr_block    = module.vpc.vpc_cidr_block
+  vpc_peering_connection_id = aws_vpc_peering_connection.eks_to_database.id
+}
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "~> 20.0"
