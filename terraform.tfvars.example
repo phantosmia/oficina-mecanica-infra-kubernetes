@@ -1,7 +1,7 @@
 aws_region          = "us-east-1"
 environment         = "dev"
 cluster_name        = "oficina-mecanica-dev"
-kubernetes_version  = "1.30"
+kubernetes_version  = "1.36"
 node_instance_types = ["t3.medium"]
 node_desired_size   = 3
 node_min_size       = 1
