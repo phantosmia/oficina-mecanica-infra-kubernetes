@@ -11,6 +11,7 @@ Provisiona a VPC, o cluster EKS, o registro de imagens e a identidade/add-ons ne
 - Repositório **Amazon ECR** para a imagem da API (com lifecycle policy).
 - IAM Role for Service Accounts (IRSA) para o AWS Load Balancer Controller e para o External Secrets Operator.
 - Instalação via Helm do **AWS Load Balancer Controller**, do **External Secrets Operator** e do **metrics-server** (necessário para o HPA da aplicação).
+- Instalação via Helm da **New Relic Kubernetes integration** (`nri-bundle`) — cobertura de infraestrutura do cluster para o monitoramento da Fase 3 ([ADR-0007](https://github.com/phantosmia/oficina-mecanica-fiap/blob/main/docs/adrs/0007-new-relic-como-plataforma-de-observabilidade.md)). Diferente do AWS Load Balancer Controller/External Secrets Operator, não depende de IRSA (não fala com nenhuma API da AWS) — só exige a variável `new_relic_license_key`.
 - IAM Role OIDC para o GitHub Actions do repositório `oficina-mecanica-fiap` publicar imagens no ECR.
 
 O **RDS PostgreSQL não é provisionado aqui**: é responsabilidade do repositório [`oficina-mecanica-infra-banco-dados`](https://github.com/phantosmia/oficina-mecanica-infra-banco-dados), que expõe seu próprio secret no Secrets Manager. Este repositório lê o ARN desse secret **automaticamente**, via `terraform_remote_state` contra o mesmo backend S3 compartilhado (ver `var.database_state_key`), só para autorizar o External Secrets Operator a lê-lo — não é preciso copiar esse ARN manualmente.
@@ -79,6 +80,7 @@ Workflow em [`.github/workflows/terraform.yml`](.github/workflows/terraform.yml)
 | Secret | `AWS_SESSION_TOKEN` | Modo `aws-academy`: session token temporário |
 | Secret | `AWS_DEPLOY_ROLE_TO_ASSUME` | Modo `oidc`: role com permissão para Terraform/EKS (alternativa: `AWS_ROLE_TO_ASSUME`) |
 | Secret | `TF_BACKEND_CONFIG` | Conteúdo completo de um `backend.hcl` (alternativa às variables abaixo) |
+| Secret | `NEW_RELIC_LICENSE_KEY` | ADR-0007. Vazio não instala a New Relic Kubernetes integration |
 | Variable | `AWS_REGION` | Região AWS |
 | Variable | `AWS_AUTH_MODE` | `oidc` ou `aws-academy` (padrão) |
 | Variable | `TF_STATE_BUCKET` | Bucket S3 do state (mesmo do `oficina-mecanica-fiap`) |

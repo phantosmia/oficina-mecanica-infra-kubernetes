@@ -131,6 +131,7 @@ jobs:
           NODE_MIN_SIZE: ${{ vars.NODE_MIN_SIZE || '1' }}
           NODE_MAX_SIZE: ${{ vars.NODE_MAX_SIZE || '2' }}
           NODE_DISK_SIZE: ${{ vars.NODE_DISK_SIZE || '20' }}
+          NEW_RELIC_LICENSE_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
           TF_STATE_BUCKET: ${{ env.TF_STATE_BUCKET }}
           TF_STATE_REGION: ${{ env.TF_STATE_REGION }}
         run: |
@@ -147,6 +148,11 @@ jobs:
               values["tf_state_bucket"] = os.environ["TF_STATE_BUCKET"]
           if os.environ.get("TF_STATE_REGION"):
               values["tf_state_region"] = os.environ["TF_STATE_REGION"]
+
+          # ADR-0007. Vazia (secret nao configurado) nao instala a New Relic
+          # Kubernetes integration, independente do modo de autenticacao.
+          if os.environ.get("NEW_RELIC_LICENSE_KEY"):
+              values["new_relic_license_key"] = os.environ["NEW_RELIC_LICENSE_KEY"]
 
           if os.environ["AUTH_MODE"] == "aws-academy":
               required = [
