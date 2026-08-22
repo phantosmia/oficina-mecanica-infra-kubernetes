@@ -53,9 +53,9 @@ variable "enable_github_actions_oidc" {
 }
 
 variable "kubernetes_version" {
-  description = "Versão do Kubernetes no EKS."
+  description = "Versão do Kubernetes no EKS. 1.30 saiu de suporte padrão da AWS — confira as versões com AMI otimizada disponível (`aws ssm get-parameter --name /aws/service/eks/optimized-ami/<versao>/amazon-linux-2023/x86_64/standard/recommended/image_id`) se o apply falhar."
   type        = string
-  default     = "1.30"
+  default     = "1.36"
 }
 
 variable "vpc_cidr" {
