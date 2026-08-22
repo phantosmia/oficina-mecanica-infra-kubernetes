@@ -96,11 +96,13 @@ Não há mais uma variable `RDS_SECRET_ARN`: o ARN do secret do RDS é lido auto
 Este repositório e o `oficina-mecanica-fiap` compartilham o mesmo backend S3 (criado por `infra/backend` naquele repositório). Isso permite que os outputs fluam entre as stacks **automaticamente**, sem copiar variables manualmente:
 
 - Este repositório lê `rds_secret_arn` do state do `oficina-mecanica-infra-banco-dados` (`data.terraform_remote_state.database`, key controlada por `var.database_state_key`) para autorizar o External Secrets Operator.
+- Este repositório também lê `vpc_id`, `vpc_cidr_block` e `default_route_table_id` do mesmo state para criar um **VPC Peering** entre a VPC do EKS e a VPC do banco (`aws_vpc_peering_connection.eks_to_database`) — os pods da aplicação principal, nesta VPC, precisam alcançar o RDS, que fica isolado numa VPC própria sem Internet Gateway/NAT (ver ADR-0005 em `oficina-mecanica-fiap`). A rota "de volta" (`aws_route.database_to_private`) também é criada por aqui, mirando a route table da VPC do banco via esses mesmos outputs — a ordem de apply da Fase 3 garante que o state do banco já existe neste ponto, mas o inverso não é verdade, por isso o peering não pode ser criado no repositório do banco. O security group do RDS (`allowed_cidr_blocks` naquele repositório) continua exigindo liberação manual do CIDR desta VPC — o peering resolve só o roteamento, não a autorização.
 - O repositório `oficina-mecanica-fiap` lê `cluster_name`, `ecr_repository_url` e `oidc_provider_arn` **deste** repositório (`data.terraform_remote_state.kubernetes`) e `rds_endpoint`/`rds_password` do `oficina-mecanica-infra-banco-dados`.
 
 ```mermaid
 flowchart LR
-    DB["oficina-mecanica-infra-banco-dados"] -- "rds_secret_arn" --> K8S["este repositório"]
+    DB["oficina-mecanica-infra-banco-dados"] -- "rds_secret_arn, vpc_id,<br/>vpc_cidr_block, default_route_table_id" --> K8S["este repositório"]
+    K8S -. "VPC Peering" .-> DB
     K8S -- "cluster_name, ecr_repository_url,<br/>oidc_provider_arn" --> APP["oficina-mecanica-fiap: infra/aws"]
     DB -- "rds_endpoint, rds_password" --> APP
 ```
