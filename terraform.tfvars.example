@@ -9,9 +9,21 @@ node_max_size       = 3
 node_disk_size      = 30
 github_repository   = "phantosmia/oficina-mecanica-fiap"
 github_branch       = "main"
-# Copie do output rds_secret_arn do repositório oficina-mecanica-infra-banco-dados
-# após aplicar aquele Terraform.
-rds_secret_arn      = ""
+
+# AWS Academy Lab: iam:CreateRole é bloqueado. Preencha com as roles
+# pré-criadas do Lab e desabilite os recursos que exigiriam criar IAM/OIDC.
+# Vazio (padrão) deixa o Terraform criar suas próprias roles — funciona
+# numa conta AWS normal, não no Lab.
+eks_admin_principal_arn    = ""
+eks_cluster_role_arn       = ""
+eks_node_role_arn          = ""
+enable_irsa_resources      = true
+enable_github_actions_oidc = true
+
+# License key (ingest) do New Relic — ver ADR-0007. Vazia não instala a
+# New Relic Kubernetes integration, mesmo com install_new_relic_integration
+# no default (true).
+new_relic_license_key = ""
 
 tags = {
   Owner      = "seu-usuario"

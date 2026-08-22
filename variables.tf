@@ -172,6 +172,25 @@ variable "metrics_server_chart_version" {
   default     = "3.12.1"
 }
 
+variable "install_new_relic_integration" {
+  description = "Instala a New Relic Kubernetes integration (nri-bundle) no EKS via Helm — cobertura de infraestrutura do cluster (ADR-0007). Só instala de fato se new_relic_license_key também estiver preenchida."
+  type        = bool
+  default     = true
+}
+
+variable "new_relic_bundle_chart_version" {
+  description = "Versão do chart Helm nri-bundle (New Relic Kubernetes integration)."
+  type        = string
+  default     = "8.0.18"
+}
+
+variable "new_relic_license_key" {
+  description = "License key (ingest) do New Relic (ADR-0007). Vazia (padrão) não instala a integração, mesmo com install_new_relic_integration=true — evita um DaemonSet órfão sem credencial válida."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "tags" {
   description = "Tags adicionais aplicadas aos recursos AWS."
   type        = map(string)

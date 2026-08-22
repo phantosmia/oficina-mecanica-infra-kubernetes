@@ -371,6 +371,57 @@ resource "helm_release" "metrics_server" {
   depends_on = [module.eks]
 }
 
+# New Relic Kubernetes integration (ADR-0007) — cobre métricas de
+# infraestrutura do cluster (nodes/pods/deployments), independente do que
+# roda dentro deles. Não usa IRSA (não fala com nenhuma API da AWS, só
+# reporta pra fora via HTTPS com a license key), então não é gated por
+# var.enable_irsa_resources como os outros dois add-ons acima.
+resource "helm_release" "newrelic_bundle" {
+  count = var.install_new_relic_integration && var.new_relic_license_key != "" ? 1 : 0
+
+  name             = "newrelic-bundle"
+  repository       = "https://helm-charts.newrelic.com"
+  chart            = "nri-bundle"
+  version          = var.new_relic_bundle_chart_version
+  namespace        = "newrelic"
+  create_namespace = true
+
+  set_sensitive {
+    name  = "global.licenseKey"
+    value = var.new_relic_license_key
+  }
+
+  set {
+    name  = "global.cluster"
+    value = local.cluster_name
+  }
+
+  # Reduz volume de ingestão (RFC-0005: free tier com teto de 100 GB/mês) —
+  # ainda cobre infraestrutura (daemonset privileged), kube-state-metrics
+  # (métricas de deployments/HPA) e logs dos pods.
+  set {
+    name  = "global.lowDataMode"
+    value = "true"
+  }
+
+  set {
+    name  = "newrelic-infrastructure.privileged"
+    value = "true"
+  }
+
+  set {
+    name  = "kube-state-metrics.enabled"
+    value = "true"
+  }
+
+  set {
+    name  = "newrelic-logging.enabled"
+    value = "true"
+  }
+
+  depends_on = [module.eks]
+}
+
 resource "aws_iam_openid_connect_provider" "github_actions" {
   count = var.enable_github_actions_oidc ? 1 : 0
 
