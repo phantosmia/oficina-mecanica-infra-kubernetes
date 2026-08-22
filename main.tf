@@ -94,9 +94,15 @@ resource "aws_vpc_peering_connection" "eks_to_database" {
 }
 
 resource "aws_route" "private_to_database" {
-  for_each = toset(module.vpc.private_route_table_ids)
+  # for_each com toset(module.vpc.private_route_table_ids) falha aqui: os IDs
+  # das route tables só existem depois do apply (não dá pra usar valores
+  # desconhecidos como chave de for_each). O tamanho da lista, porém, já é
+  # conhecido em tempo de plan (com single_nat_gateway=true o módulo cria
+  # uma única route table privada compartilhada, não uma por AZ), então
+  # count + indexação funciona.
+  count = length(module.vpc.private_route_table_ids)
 
-  route_table_id            = each.value
+  route_table_id            = module.vpc.private_route_table_ids[count.index]
   destination_cidr_block    = data.terraform_remote_state.database.outputs.vpc_cidr_block
   vpc_peering_connection_id = aws_vpc_peering_connection.eks_to_database.id
 }
