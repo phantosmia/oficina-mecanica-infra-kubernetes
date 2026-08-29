@@ -108,8 +108,23 @@ jobs:
         # database_state_key aponta para homologacao (não para dev): o
         # ambiente dev foi destruído deliberadamente (ver docs/sessoes/ em
         # oficina-mecanica-fiap) e este plan de validação de PR precisa ler
-        # um remote state que exista de verdade.
-        run: terraform plan -var="environment=dev-preview" -var="database_state_key=database/homologacao/terraform.tfstate"
+        # um remote state que exista de verdade. tf_state_bucket/region
+        # também precisam ser passados explicitamente (o default do
+        # variables.tf é só um placeholder). eks_cluster_role_arn/
+        # eks_node_role_arn evitam que o módulo tente criar uma IAM role
+        # própria com var.environment no nome — sem eles, "dev-preview" (ou
+        # "homologacao"/"producao", mesmo tamanho) estoura o limite de 38
+        # caracteres do name_prefix da role (só aparece nesse caminho de
+        # "criar role própria", nunca usado nos applies reais, que sempre
+        # informam essas roles).
+        run: |
+          terraform plan \
+            -var="environment=dev-preview" \
+            -var="database_state_key=database/homologacao/terraform.tfstate" \
+            -var="tf_state_bucket=${{ env.TF_STATE_BUCKET }}" \
+            -var="tf_state_region=${{ env.TF_STATE_REGION }}" \
+            -var="eks_cluster_role_arn=${{ vars.EKS_CLUSTER_ROLE_ARN }}" \
+            -var="eks_node_role_arn=${{ vars.EKS_NODE_ROLE_ARN }}"
 
   apply:
     name: Apply (${{ github.ref_name }})
