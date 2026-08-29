@@ -133,4 +133,4 @@ Ver [`variables.tf`](variables.tf) e [`outputs.tf`](outputs.tf) para a lista com
 
 - [oficina-mecanica-fiap](https://github.com/phantosmia/oficina-mecanica-fiap) — aplicação principal (roda no cluster criado aqui; cria os secrets da API e a IRSA role do próprio pod em `infra/aws`).
 - [oficina-mecanica-infra-banco-dados](https://github.com/phantosmia/oficina-mecanica-infra-banco-dados) — infraestrutura do banco de dados gerenciado.
-- [oficina-mecanica-lambda-auth](https://github.com/phantosmia/oficina-mecanica-lambda-auth) — function serverless de autenticação via CPF (placeholder).
+- [oficina-mecanica-lambda-auth](https://github.com/phantosmia/oficina-mecanica-lambda-auth) — function serverless de autenticação via CPF.
