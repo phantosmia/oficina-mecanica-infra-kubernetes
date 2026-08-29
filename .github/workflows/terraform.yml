@@ -57,14 +57,59 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform init (sem backend remoto — plan de validação, não usa state real)
-        run: terraform init -backend=false
+      - name: Terraform init (backend local — plan de validação, não usa state real)
+        # Terraform >= 1.15 recusa "terraform plan" após "init -backend=false"
+        # quando a config declara backend "s3" ("Backend initialization
+        # required" mesmo com -backend=false) — o override para backend
+        # "local" contorna sem precisar tocar no state real só para validar
+        # um PR. Não afeta a leitura de data.terraform_remote_state.database
+        # abaixo, que já configura seu próprio backend "s3" explícito.
+        run: |
+          cat > override.tf <<'EOF'
+          terraform {
+            backend "local" {}
+          }
+          EOF
+          terraform init
 
       - name: Terraform validate
         run: terraform validate
 
+      - name: Ajustar módulo EKS para AWS Academy
+        # Mesmo patch do job de apply (ver abaixo), necessário aqui também:
+        # o plan avalia data.aws_iam_session_context.current mesmo sem
+        # aplicar nada, e ele falha com iam:GetRole em voclabs sem o patch.
+        if: ${{ env.AWS_AUTH_MODE == 'aws-academy' }}
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          module_file = Path(".terraform/modules/eks/main.tf")
+          content = module_file.read_text(encoding="utf-8")
+          block_start = content.index('data "aws_iam_session_context" "current" {')
+          block_end = content.index("\n}", block_start)
+          block = content[block_start:block_end]
+
+          old = "count = local.create ? 1 : 0"
+          new = "count = local.create && var.enable_cluster_creator_admin_permissions ? 1 : 0"
+
+          if new in block:
+              print("Módulo EKS já compatível com AWS Academy.")
+          elif old in block:
+              patched_block = block.replace(old, new, 1)
+              content = content[:block_start] + patched_block + content[block_end:]
+              module_file.write_text(content, encoding="utf-8")
+              print("Módulo EKS ajustado para evitar iam:GetRole em voclabs.")
+          else:
+              raise SystemExit("Não foi possível localizar o count esperado em data.aws_iam_session_context.current.")
+          PY
+
       - name: Terraform plan
-        run: terraform plan -var="environment=dev-preview"
+        # database_state_key aponta para homologacao (não para dev): o
+        # ambiente dev foi destruído deliberadamente (ver docs/sessoes/ em
+        # oficina-mecanica-fiap) e este plan de validação de PR precisa ler
+        # um remote state que exista de verdade.
+        run: terraform plan -var="environment=dev-preview" -var="database_state_key=database/homologacao/terraform.tfstate"
 
   apply:
     name: Apply (${{ github.ref_name }})
