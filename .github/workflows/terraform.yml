@@ -303,6 +303,15 @@ jobs:
           # via terraform_remote_state. Se aquele repositório nunca foi aplicado no
           # ambiente "${{ github.ref_name }}", o plan falha com "Unable to find remote
           # state" — capturamos aqui para deixar a causa raiz e a correção explícitas.
+          #
+          # set -o pipefail é obrigatório aqui: o shell default do runner (bash -e,
+          # sem pipefail) só olha o exit code do último comando do pipe (tee, que
+          # é sempre 0) — sem isso, "if ! terraform plan | tee ..." nunca detecta
+          # a falha do terraform plan (de qualquer causa, não só remote state
+          # ausente), e o job só falha um passo depois, no apply, com "Failed to
+          # load tfplan as a plan file: no such file or directory" — sem a causa
+          # raiz real no log (mesmo bug do PR #22 em oficina-mecanica-fiap).
+          set -o pipefail
           if ! terraform plan -out=tfplan \
             -var="environment=${{ github.ref_name }}" \
             -var="database_state_key=database/${{ github.ref_name }}/terraform.tfstate" \
